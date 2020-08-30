@@ -1,0 +1,194 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('poliscacosnode:server');
+var http = require('http');
+var getRandom = require('../utilities/getRandom');
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+var io = require('socket.io')(server);
+
+// Make variable 'io' available across the server
+// Then in any other file require it using -> let io = app.get('io');
+app.set('io', io);
+
+// On user connecting to the server
+io.on('connection', socket => {
+  // console.log('New connection ' + socket.id);
+
+  // Create new room
+  socket.on('create-room', () => {
+    // Create room ID
+    const roomId = getRandom();
+
+    // Join requesting user to that new room
+    socket.join(roomId.toString(), err => {
+      if (err) console.log('Error: ' + err);
+
+      console.log(socket.rooms);
+
+      // Get room's details
+      let users = io.sockets.adapter.rooms[roomId];
+
+      // Send success message to user
+      io.emit('create-room-successful', {
+        roomId: roomId,
+        userId: socket.id,
+        users: users
+      });
+    });
+  });
+
+
+  // User joins existing room
+  socket.on('join-room', roomId => {
+    console.log(socket.id, roomId, typeof (roomId))
+
+    // User joins room (from provided roomId)
+    socket.join(roomId, err => {
+      if (err) console.log('Error while joining room ' + err);
+
+      // Get room's details
+      let users = io.sockets.adapter.rooms[roomId];
+
+      console.log(users);
+
+      // Send success message to requesting user
+      socket.emit('join-room-successful', {
+        roomId: roomId,
+        users: users,
+        userId: socket.id
+      });
+
+      // Send success message to the rest of the room's users
+      socket.to(roomId).emit('user-joined', {
+        roomId: roomId,
+        users: users
+      })
+    })
+  })
+
+  // User leaves room
+  socket.on('leave-room', roomId => {
+    roomId = roomId.toString();
+
+    // User leaves room
+    socket.leave(roomId, err => leaveRoom(socket, roomId, err));
+  })
+
+  // Game starts or next round
+  socket.on('next-round', roomId => {
+    socket.emit('loading-round', roomId);
+    socket.to(roomId).emit('loading-round', roomId);
+  })
+
+})
+
+io.on('disconnect', socket => {
+  console.log('User disconnected ' + socket.id);
+})
+
+function leaveRoom(socket, roomId, err = null) {
+  if (err) console.log('Error while leaving the room: ', err);
+
+  else {
+    console.log(`User ${socket.id} left the room ${roomId}`);
+    // Get room's details
+    let users = io.sockets.adapter.rooms[roomId];
+
+    // Send success message to requesting user
+    socket.emit('leave-room-successful', {
+      roomId: roomId,
+      users: users
+    });
+
+    // Send success message to the rest of the room's users
+    socket.to(roomId).emit('user-left', {
+      roomId: roomId,
+      users: users
+    })
+  }
+}
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
